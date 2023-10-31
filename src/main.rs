@@ -8,7 +8,7 @@ const KEY_FLAG: KeyCode = KeyCode::Char('f');
 #[derive(Debug, Clone)]
 struct Size2D(usize, usize);
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 struct Point2D(usize, usize);
 
 impl Size2D {
@@ -19,13 +19,13 @@ impl Size2D {
 
 impl Point2D {
     fn clip_excl(&mut self, size2d: &Size2D) {
-        self.0 = min(self.0, sub_non_zero(&size2d.0, &1));
-        self.1 = min(self.1, sub_non_zero(&size2d.1, &1));
+        self.0 = min(self.0, sub_non_zero(&size2d.0, 1));
+        self.1 = min(self.1, sub_non_zero(&size2d.1, 1));
     }
 
     fn neighbours(&self) -> Vec<Point2D> {
         let origin = Point2D(self.0 + 1, self.1 + 1);
-        let neighbours = vec![
+        vec![
             Point2D(origin.0 - 1, origin.1 - 1),
             Point2D(origin.0, origin.1 - 1),
             Point2D(origin.0 + 1, origin.1 - 1),
@@ -37,17 +37,12 @@ impl Point2D {
         ].into_iter()
             .filter(|point| point.0 > 0 && point.1 > 0)
             .map(|point| Point2D(point.0 - 1, point.1 - 1))
-            .collect();
-        neighbours
+            .collect()
     }
 }
 
-fn sub_non_zero(a: &usize, b: &usize) -> usize {
-    if a.eq(&0) {
-        0
-    } else {
-        a - b
-    }
+fn sub_non_zero(a: &usize, b: usize) -> usize {
+    a.checked_sub(b).unwrap_or(0)
 }
 
 struct Vec2D<T> {
@@ -93,10 +88,41 @@ enum CellState {
     Opened,
 }
 
+impl CellState {
+    fn open(&self) -> CellState {
+        match self {
+            CellState::Closed => CellState::Opened,
+            state => state.clone(),
+        }
+    }
+
+    fn toggle_flag(&self) -> CellState {
+        match self {
+            CellState::Closed => CellState::Flagged,
+            CellState::Flagged => CellState::Closed,
+            CellState::Opened => CellState::Opened,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct Cell {
     cell_type: CellType,
     state: CellState,
+}
+
+impl Cell {
+    fn open(&mut self) {
+        self.state = self.state.open();
+    }
+
+    fn is_open(&self) -> bool {
+        self.state.eq(&CellState::Opened)
+    }
+
+    fn flag(&mut self) {
+        self.state = self.state.toggle_flag();
+    }
 }
 
 struct Minefield {
@@ -133,13 +159,8 @@ impl Minefield {
     fn open(&mut self, location: &Point2D) {
         let mut opened_water = false;
         if let Some(cell) = self.get_mut(location) {
-            cell.state = match cell.state {
-                CellState::Closed => {
-                    opened_water = cell.cell_type.eq(&CellType::Water);
-                    CellState::Opened
-                },
-                state => state,
-            };
+            opened_water = !cell.is_open() && cell.cell_type.eq(&CellType::Water);
+            cell.open();
         };
         let no_neighbouring_mines = self.count_neighbours(location).eq(&0);
         if opened_water && no_neighbouring_mines {
@@ -151,11 +172,7 @@ impl Minefield {
 
     fn flag(&mut self, location: &Point2D) {
         if let Some(cell) = self.get_mut(location) {
-            cell.state = match cell.state {
-                CellState::Flagged => CellState::Closed,
-                CellState::Closed => CellState::Flagged,
-                CellState::Opened => CellState::Opened,
-            }
+            cell.flag();
         }
     }
 
@@ -274,6 +291,13 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use crate::sub_non_zero;
+
+    #[test]
+    fn sub_non_zero_under_zero() {
+        assert_eq!(0, sub_non_zero(&6, 8));
+    }
+
     mod size2d {
         use crate::{Point2D, Size2D};
 
@@ -299,6 +323,29 @@ mod tests {
         }
     }
 
+    mod point2d {
+        use crate::{Point2D, Size2D};
+
+        #[test]
+        fn clip() {
+            let mut point = Point2D(10, 10);
+            let size = Size2D(6, 8);
+            point.clip_excl(&size);
+            assert_eq!(Point2D(5, 7), point);
+        }
+
+        #[test]
+        fn all_neighbours() {
+            let point = Point2D(1, 1);
+            assert_eq!(8, point.neighbours().len());
+        }
+
+        #[test]
+        fn neighbours_for_origin() {
+            assert_eq!(3, Point2D::default().neighbours().len());
+        }
+    }
+
     mod vec2d {
         use crate::{Point2D, Size2D, Vec2D};
 
@@ -306,6 +353,24 @@ mod tests {
         fn get_value_in_single_cell_vec2d() {
             let v = Vec2D::sized(&Size2D(1, 1), 5);
             assert_eq!(&5, v.get(&Point2D(0, 0)).unwrap());
+        }
+    }
+
+    mod cell_state {
+        use crate::CellState;
+
+        #[test]
+        fn toggle_flag() {
+            assert_eq!(CellState::Opened, CellState::Opened.toggle_flag());
+            assert_eq!(CellState::Flagged, CellState::Closed.toggle_flag());
+            assert_eq!(CellState::Closed, CellState::Flagged.toggle_flag());
+        }
+
+        #[test]
+        fn open() {
+            assert_eq!(CellState::Opened, CellState::Opened.open());
+            assert_eq!(CellState::Opened, CellState::Closed.open());
+            assert_eq!(CellState::Flagged, CellState::Flagged.open());
         }
     }
 }
